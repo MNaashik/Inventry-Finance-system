@@ -1,0 +1,485 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderSource {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  PHONE
+  WALK_IN
+}
+
+enum OrderStatus {
+  ORDERED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Product {
+  id               String            @id @default(cuid())
+  name             String
+  sku              String
+  description      String?
+  price            Float
+  stock            Int               @default(0)
+  lowStockAlert    Int               @default(5)
+  category         String
+  categoryId       String?
+  categoryRelation Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  variants         ProductVariant[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  orderItems       OrderItem[]
+  stockAdjustments StockAdjustment[]
+  organizationId   String
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseItems    PurchaseItem[]
+
+  @@unique([sku, organizationId])
+}
+
+model Customer {
+  id                 String            @id @default(cuid())
+  name               String
+  email              String?
+  phone              String?
+  address            String?
+  totalSales         Float             @default(0)
+  totalPaid          Float             @default(0)
+  outstandingBalance Float             @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  orders             Order[]
+  payments           CustomerPayment[]
+  organizationId     String
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id             String         @id @default(cuid())
+  orderNumber    String
+  customerId     String?
+  customer       Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  source         OrderSource
+  status         OrderStatus    @default(ORDERED)
+  discountType   String? // "PERCENTAGE" or "AMOUNT"
+  discountValue  Float? // rate (e.g. 10 for 10%) or absolute amount (e.g. 15 for $15)
+  discountAmount Float? // calculated absolute discount amount subtracted from subtotal
+  totalAmount    Float
+  notes          String?
+  paymentStatus  String         @default("UNPAID") // "PAID", "UNPAID"
+  paymentMethod  String? // "CASH", "BANK", "CREDIT"
+  bankAccountId  String?
+  bankAccount    BankAccount?   @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId  String?
+  cashAccount    CashAccount?   @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  cashBookEntry  CashBookEntry?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  items          OrderItem[]
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([orderNumber, organizationId])
+}
+
+model OrderItem {
+  id               String          @id @default(cuid())
+  orderId          String
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariantId String?
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  quantity         Int
+  priceAtOrder     Float
+}
+
+model StockAdjustment {
+  id               String          @id @default(cuid())
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariantId String?
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  quantityChange   Int // Positive for restock, negative for deduction
+  reason           String // e.g., "Manual Adjustment", "Damaged Goods", "New Order"
+  createdAt        DateTime        @default(now())
+  organizationId   String
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Organization {
+  id                String            @id @default(cuid())
+  name              String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  profiles          Profile[]
+  products          Product[]
+  productVariants   ProductVariant[]
+  customers         Customer[]
+  orders            Order[]
+  stockAdjustments  StockAdjustment[]
+  categories        Category[]
+  isSuspended       Boolean           @default(false)
+  suspensionReason  String?
+  bankAccounts      BankAccount[]
+  cashAccounts      CashAccount[]
+  expenseCategories ExpenseCategory[]
+  expenses          Expense[]
+  otherIncomes      OtherIncome[]
+  cashBookEntries   CashBookEntry[]
+  suppliers         Supplier[]
+  purchases         Purchase[]
+  customerPayments  CustomerPayment[]
+  supplierPayments  SupplierPayment[]
+  openingBalances   OpeningBalance?
+}
+
+model BankAccount {
+  id               String            @id @default(cuid())
+  name             String
+  bankName         String
+  accountNumber    String
+  accountHolder    String?
+  balance          Float             @default(0)
+  organizationId   String
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenses         Expense[]
+  otherIncomes     OtherIncome[]
+  cashBookEntries  CashBookEntry[]
+  orders           Order[]
+  purchases        Purchase[]
+  customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model CashAccount {
+  id               String            @id @default(cuid())
+  name             String // e.g. "Main Cash Drawer", "Petty Cash"
+  balance          Float             @default(0)
+  organizationId   String
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenses         Expense[]
+  otherIncomes     OtherIncome[]
+  cashBookEntries  CashBookEntry[]
+  orders           Order[]
+  purchases        Purchase[]
+  customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model ExpenseCategory {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  color          String       @default("#6366f1")
+  icon           String       @default("Tag")
+  isActive       Boolean      @default(true)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenses       Expense[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([name, organizationId])
+}
+
+model Expense {
+  id                String          @id @default(cuid())
+  expenseNumber     String
+  amount            Float
+  tax               Float           @default(0)
+  date              DateTime
+  description       String?
+  supplier          String?
+  paymentMethod     String // "CASH", "BANK"
+  bankAccountId     String?
+  bankAccount       BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId     String?
+  cashAccount       CashAccount?    @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  expenseCategoryId String
+  expenseCategory   ExpenseCategory @relation(fields: [expenseCategoryId], references: [id], onDelete: Cascade)
+  reference         String?
+  attachment        String?
+  notes             String?
+  status            String          @default("PAID") // "PAID", "PENDING"
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cashBookEntry     CashBookEntry?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([expenseNumber, organizationId])
+}
+
+model OtherIncome {
+  id             String         @id @default(cuid())
+  incomeNumber   String
+  amount         Float
+  date           DateTime
+  description    String?
+  category       String
+  paymentMethod  String // "CASH", "BANK"
+  bankAccountId  String?
+  bankAccount    BankAccount?   @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId  String?
+  cashAccount    CashAccount?   @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  reference      String?
+  notes          String?
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cashBookEntry  CashBookEntry?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([incomeNumber, organizationId])
+}
+
+model CashBookEntry {
+  id                String           @id @default(cuid())
+  amount            Float
+  date              DateTime
+  description       String
+  type              String // "INFLOW", "OUTFLOW"
+  debit             Float?
+  credit            Float?
+  runningBalance    Float            @default(0)
+  sourceModule      String           @default("CASH_BOOK") // "CASH_BOOK", "EXPENSE", "INCOME", "SALE", "PURCHASE", "CUSTOMER_PAYMENT", "SUPPLIER_PAYMENT"
+  paymentMethod     String // "CASH", "BANK"
+  bankAccountId     String?
+  bankAccount       BankAccount?     @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId     String?
+  cashAccount       CashAccount?     @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  reference         String?
+  expenseId         String?          @unique
+  expense           Expense?         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  otherIncomeId     String?          @unique
+  otherIncome       OtherIncome?     @relation(fields: [otherIncomeId], references: [id], onDelete: Cascade)
+  orderId           String?          @unique
+  order             Order?           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  purchaseId        String?          @unique
+  purchase          Purchase?        @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  customerPaymentId String?          @unique
+  customerPayment   CustomerPayment? @relation(fields: [customerPaymentId], references: [id], onDelete: Cascade)
+  supplierPaymentId String?          @unique
+  supplierPayment   SupplierPayment? @relation(fields: [supplierPaymentId], references: [id], onDelete: Cascade)
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model Profile {
+  id               String       @id // Matches Supabase Auth user ID (uuid)
+  email            String       @unique
+  name             String?
+  avatarUrl        String?
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  role             String       @default("USER") // "USER" or "SUPERADMIN"
+  isSuspended      Boolean      @default(false)
+  suspensionReason String?
+}
+
+model Category {
+  id             String              @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products       Product[]
+  attributes     CategoryAttribute[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([name, organizationId])
+}
+
+model CategoryAttribute {
+  id            String                         @id @default(cuid())
+  name          String
+  type          String // "TEXT" or "DROPDOWN"
+  categoryId    String
+  category      Category                       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  options       CategoryAttributeOption[]
+  variantValues ProductVariantAttributeValue[]
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+
+  @@unique([name, categoryId])
+}
+
+model CategoryAttributeOption {
+  id          String            @id @default(cuid())
+  value       String
+  position    Int               @default(0)
+  attributeId String
+  attribute   CategoryAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([value, attributeId])
+}
+
+model ProductVariant {
+  id               String                         @id @default(cuid())
+  productId        String
+  product          Product                        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku              String?
+  barcode          String?
+  price            Float? // Custom selling price (if overrides parent)
+  purchasePrice    Float? // Custom purchase price/cost
+  stock            Int                            @default(0)
+  status           String                         @default("ACTIVE") // "ACTIVE" or "INACTIVE"
+  imageUrl         String?
+  attributeValues  ProductVariantAttributeValue[]
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  orderItems       OrderItem[]
+  stockAdjustments StockAdjustment[]
+  organizationId   String
+  organization     Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseItems    PurchaseItem[]
+}
+
+model ProductVariantAttributeValue {
+  id               String            @id @default(cuid())
+  productVariantId String
+  productVariant   ProductVariant    @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  attributeId      String
+  attribute        CategoryAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  value            String
+
+  @@unique([productVariantId, attributeId])
+}
+
+model Supplier {
+  id                 String            @id @default(cuid())
+  name               String
+  email              String?
+  phone              String?
+  address            String?
+  totalPurchases     Float             @default(0)
+  totalPaid          Float             @default(0)
+  outstandingBalance Float             @default(0)
+  organizationId     String
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchases          Purchase[]
+  payments           SupplierPayment[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+model Purchase {
+  id             String            @id @default(cuid())
+  purchaseNumber String
+  supplierId     String?
+  supplier       Supplier?         @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  status         String            @default("ORDERED") // "ORDERED", "COMPLETED", "CANCELLED"
+  paymentStatus  String            @default("UNPAID") // "PAID", "UNPAID", "PARTIALLY_PAID"
+  paymentMethod  String? // "CASH", "BANK", "CREDIT"
+  bankAccountId  String?
+  bankAccount    BankAccount?      @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId  String?
+  cashAccount    CashAccount?      @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  totalAmount    Float
+  paidAmount     Float             @default(0)
+  notes          String?
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items          PurchaseItem[]
+  payments       SupplierPayment[]
+  cashBookEntry  CashBookEntry?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([purchaseNumber, organizationId])
+}
+
+model PurchaseItem {
+  id               String          @id @default(cuid())
+  purchaseId       String
+  purchase         Purchase        @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVariantId String?
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  quantity         Int
+  priceAtPurchase  Float
+}
+
+model CustomerPayment {
+  id             String         @id @default(cuid())
+  paymentNumber  String
+  customerId     String
+  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  amount         Float
+  date           DateTime       @default(now())
+  paymentMethod  String // "CASH", "BANK"
+  bankAccountId  String?
+  bankAccount    BankAccount?   @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId  String?
+  cashAccount    CashAccount?   @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  reference      String?
+  notes          String?
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cashBookEntry  CashBookEntry?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([paymentNumber, organizationId])
+}
+
+model SupplierPayment {
+  id             String         @id @default(cuid())
+  paymentNumber  String
+  supplierId     String
+  supplier       Supplier       @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  purchaseId     String?
+  purchase       Purchase?      @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  amount         Float
+  date           DateTime       @default(now())
+  paymentMethod  String // "CASH", "BANK"
+  bankAccountId  String?
+  bankAccount    BankAccount?   @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  cashAccountId  String?
+  cashAccount    CashAccount?   @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  reference      String?
+  notes          String?
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cashBookEntry  CashBookEntry?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([paymentNumber, organizationId])
+}
+
+model OpeningBalance {
+  id                         String       @id @default(cuid())
+  openingCash                Float        @default(0)
+  openingBank                Float        @default(0)
+  openingInventoryValue      Float        @default(0)
+  openingCustomerReceivables Float        @default(0)
+  openingSupplierPayables    Float        @default(0)
+  openingDate                DateTime     @default(now())
+  organizationId             String       @unique
+  organization               Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+}
