@@ -2,6 +2,24 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { headers } from "next/headers";
+
+async function getOrigin() {
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL;
+  }
+  try {
+    const headerList = await headers();
+    const host = headerList.get("x-forwarded-host") || headerList.get("host");
+    const proto = headerList.get("x-forwarded-proto") || "http";
+    if (host) {
+      return `${proto}://${host}`;
+    }
+  } catch (err) {
+    // Fallback if headers() cannot be called
+  }
+  return "http://localhost:4000";
+}
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
@@ -81,9 +99,13 @@ export async function register(formData: FormData) {
 
   try {
     const supabase = await createClient();
+    const origin = await getOrigin();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: `${origin}/auth/callback`,
+      },
     });
 
     if (error) {
@@ -141,7 +163,7 @@ export async function forgotPassword(formData: FormData) {
 
   try {
     const supabase = await createClient();
-    const origin = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:4000";
+    const origin = await getOrigin();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${origin}/auth/callback?next=/reset-password`,
     });
