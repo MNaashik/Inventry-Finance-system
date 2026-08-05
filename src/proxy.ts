@@ -65,7 +65,8 @@ export async function proxy(request: NextRequest) {
     user &&
     isAuthRoute &&
     !path.startsWith("/auth/callback") &&
-    !path.startsWith("/auth/confirm")
+    !path.startsWith("/auth/confirm") &&
+    !path.startsWith("/reset-password")
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
